@@ -1,3 +1,8 @@
+# ignoring everithing under data
+**/data/*
+!**data/__init__.py
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
