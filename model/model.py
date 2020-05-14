@@ -1,77 +1,83 @@
 import numpy as np
 import tensorflow as tf
-from keras.layers import Conv2D, MaxPooling2D, Dense, Flatten, UpSampling2D
+from .loss_functions import (custom_output_g1_loss, custom_output_g2_loss,\
+                             custom_disc_loss, fake_loss
+                             )
+from .pose_guided_person_image_generation import (gan_1, gan_2, get_noise, \
+                                                    LeakyReLU, param, DiscBatchNormalization, \
+                                                    discriminator
+    )
 
+from keras.layers import (Conv2D, Flatten, Activation, Dense, Reshape, \
+                          UpSampling2D, Input, merge, Concatenate, merge, add, Lambda, \
+                          BatchNormalization, Permute, Add
+                         )
+from keras.models import Model
 
-def GeneratorCNN_Pose_UAEAfterResidual(x, pose_target, input_channel, z_num, no_of_pairs, hidden_num, data_format,
-                                       activation_fn=tf.nn.elu, min_fea_map_H=8, noise_dim=0):
+from keras.optimizers import Adam
+
+# import pickle
+# with open('mask_target.p', 'rb') as f:
+#     mask_target = pickle.load(f)
+#     mask_target = tf.convert_to_tensor(mask_target, dtype=tf.float32) 
+# with open('x.p', 'rb') as f:
+#     x = pickle.load(f)
+# with open('x_target.p', 'rb') as f:
+#     x_target = pickle.load(f)
+# with open('pose_target.p', 'rb') as f:
+#     pose_target = pickle.load(f)
+
+def main_model():
     """
-
-    :param x: input image with dimension of 128*64*3
-    :param pose_target: pose target image which is the expected output image of dimension 128*64*3
-    :param input_channel:
-    :param z_num:
-    :param no_of_pairs: number of skip connections in GAN (previously repeat_num)
-    :param filter_shape: shape of filters (previously hidden_num)
-    :param data_format: NHWC no of images, height, width, channels of image
-    :param activation_fn: tt.nn.elu formula is: exp(input) - 1 if < 0 else input
-    :param min_fea_map_H:
-    :param noise_dim:
-    :return:
+    Model Inputs:
+        x: input image 
+        target: target image in the time of training
+        mask_target: mask of target
+    Model Outputs:
+        Output G1: Target Image
+        Output G2: Same  Target Image
+        discriminator_output: pass np.empty with same shape as required
+        mask_target_fake: pass np.empty with shape BatchSize*128*64*3
     """
+    x = Input(shape=(128, 64, 3))
+    target = Input(shape=(128, 64, 3))
+    mask_target = Input(name='mask_target', shape=(128, 64, 3))
+    mask_target_fake = Reshape(target_shape=(128, 64, 3), name='mask_target_fake')(mask_target)
+    
+    output_g1 = gan_1(x)
+    input_g2 = Concatenate(axis=-1)([x, output_g1])
+    
+    diff_map = gan_2(input_g2)
+    output_g2 = Add(name='output_g2')([output_g1, diff_map])
+    
+    triplet = Concatenate(axis=0)([target, x, output_g1, output_g2])
+    discriminator_input = Permute([3,1,2])(triplet)
+    discriminator_output = discriminator(triplet)
+    
+    return Model([x, target, mask_target], [output_g1, output_g2, discriminator_output, mask_target_fake])
 
-    with tf.compat.v1.variable_scope("G") as vs:
-        model = Model()
-        if pose_target is not None:
-            x = tf.concat([x, pose_target], 3)  # op shape will be 128*64*6
 
-        # Encoder
-        encoder_layer_list = []
-        x = Conv2D(hidden_num, 3, 1, activation=activation_fn)(x)
+def fake_metrics(y_actual, y_pred):
+  return 0.0
 
-        for idx in range(no_of_pairs):
-            # to increase number of filter by (filters)*(index+1) ex: 16, 32, 48 ...
-            channel_num = hidden_num * (idx + 1)
+def model():
+    model = main_model()
 
-            res = x
-            x = Conv2D(channel_num, 3, 1, activation=activation_fn)(x)
-            x = Conv2D(channel_num, 3, 1, activation=activation_fn)(x)
+    # defining loss, optimizers and metrics
+    loss_1 = dict(output_g1=custom_output_g1_loss(mask_target), output_g2=custom_output_g2_loss(mask_target), 
+                  discriminator_output=custom_disc_loss, mask_target_fake=fake_loss)
+    lossWeights = dict(output_g1=1.0, output_g2=1.0, discriminator_output=1.0, mask_target_fake=0.0)
+    metrics = dict(output_g1='accuracy', output_g2='accuracy', discriminator_output=fake_metrics, mask_target_fake=fake_metrics)
 
-            x = x + res
+    optimizer_1 = Adam(lr=2e-5, beta_1=0.5)
 
-            encoder_layer_list.append(x)
-            if idx < no_of_pairs - 1:
-                x = Conv2D(hidden_num * (idx + 2), 3, 2, activation=activation_fn)(x)
+    # compile model
+    model.compile(optimizer=optimizer_1, loss=loss_1, loss_weights=lossWeights, metrics=metrics)
 
-        # for flattening the layer
-        x = tf.reshape(x, [-1, np.prod([min_fea_map_H, min_fea_map_H / 2, channel_num])])
+    model.fit([x, x_target, mask_target], y=[x_target, x_target, np.empty((64, 1, 1, 1)), np.empty((64, 128, 64, 3))], batch_size=2, epochs=30)
 
-        z = x = Dense(x, z_num, activation=None)(x)
+    # model.summary()
 
-        if noise_dim > 0:
-            noise = tf.random_uniform(
-                (tf.shape(z)[0], noise_dim), minval=-1.0, maxval=1.0)
-            z = tf.concat([z, noise], 1)
 
-        # Decoder
-        x = Dense(np.prod([min_fea_map_H, min_fea_map_H / 2, hidden_num]), activation=None)(z)
-        x = tf.reshape(x, [-1, min_fea_map_H, min_fea_map_H / 2, hidden_num])
-
-        for idx in range(no_of_pairs):
-            x = tf.concat([x, encoder_layer_list[no_of_pairs - 1 - idx]], axis=-1)
-            res = x
-
-            # channel_num = hidden_num * (repeat_num-idx)
-            channel_num = x.get_shape()[-1]
-            x = Conv2D(channel_num, 3, 1, activation=activation_fn)(x)
-            x = Conv2D(channel_num, 3, 1, activation=activation_fn)(x)
-            x = x + res
-
-            if idx < no_of_pairs - 1:
-                x = UpSampling2D(2)(x)
-                x = Conv2D(hidden_num * (no_of_pairs - idx - 1), 1, 1, activation=activation_fn)(x)
-
-        out = Conv2D(input_channel, 3, 1, activation=None)(x)
-
-    # variables = tf.contrib.framework.get_variables(vs)
-    return out, z, variables
+if __name__=='__main__':
+    model()
