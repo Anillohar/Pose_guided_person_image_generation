@@ -166,8 +166,6 @@ def main_model():
     target = Input(shape=(128, 64, 3))
     mask_target = Input(name='mask_target', shape=(128, 64, 3))
     mask_target_fake = Reshape(target_shape=(128, 64, 3), name='mask_target_fake')(mask_target)
-    # flatten_mask_target_fake = Flatten()(mask_target)
-    # mask_target_fake = Dense(1, name='mask_target_fake')(flatten_mask_target_fake)
     
     output_g1 = gan_1(x)
     input_g2 = Concatenate(axis=-1)([x, output_g1])
