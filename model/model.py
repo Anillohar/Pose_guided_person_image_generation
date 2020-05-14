@@ -1,31 +1,22 @@
+import pickle
+import random
 import numpy as np
-import tensorflow as tf
-from .loss_functions import (custom_output_g1_loss, custom_output_g2_loss,\
-                             custom_disc_loss, fake_loss
-                             )
-from .pose_guided_person_image_generation import (gan_1, gan_2, get_noise, \
-                                                    LeakyReLU, param, DiscBatchNormalization, \
-                                                    discriminator
-    )
 
+import tensorflow as tf
+
+from keras.models import Model
+from keras.optimizers import Adam
 from keras.layers import (Conv2D, Flatten, Activation, Dense, Reshape, \
                           UpSampling2D, Input, merge, Concatenate, merge, add, Lambda, \
                           BatchNormalization, Permute, Add
                          )
-from keras.models import Model
+from pose_guided_person_image_generation import (gan_1, gan_2, get_noise, \
+                                                    LeakyReLU, param, DiscBatchNormalization, \
+                                                    discriminator
+    )
 
-from keras.optimizers import Adam
 
-# import pickle
-# with open('mask_target.p', 'rb') as f:
-#     mask_target = pickle.load(f)
-#     mask_target = tf.convert_to_tensor(mask_target, dtype=tf.float32) 
-# with open('x.p', 'rb') as f:
-#     x = pickle.load(f)
-# with open('x_target.p', 'rb') as f:
-#     x_target = pickle.load(f)
-# with open('pose_target.p', 'rb') as f:
-#     pose_target = pickle.load(f)
+
 
 def main_model():
     """
@@ -60,7 +51,55 @@ def main_model():
 def fake_metrics(y_actual, y_pred):
   return 0.0
 
-def model():
+# loss functions
+def custom_output_g1_loss(mask_target):
+    def g1_loss(x_target, gan_1_predicted):
+        layer = model.get_layer(name='mask_target')
+        mask_target = layer.output
+        layer = model.get_layer(name='discriminator_output')
+        discriminator_output = layer.output
+        PoseMaskLoss1 = tf.reduce_mean(tf.abs(gan_1_predicted - x_target) * (mask_target))
+        g_loss1 = tf.reduce_mean(tf.abs(gan_1_predicted-x_target)) + PoseMaskLoss1
+        return g_loss1
+    return g1_loss
+  
+def custom_output_g2_loss(mask_target):
+    def g2_loss(x_target, gan_2_predicted):
+        layer = model.get_layer(name='mask_target')
+        mask_target = layer.output
+        layer = model.get_layer(name='discriminator_output')
+        discriminator_output = layer.output
+        _, _, _, disc_fake_g2 = tf.split(discriminator_output, 4)
+        g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_fake_g2, labels=tf.ones_like(disc_fake_g2)))
+        PoseMaskLoss1 = tf.reduce_mean(tf.abs(gan_2_predicted - x_target) * (mask_target))
+        l1_loss = tf.reduce_mean(tf.abs(gan_2_predicted-x_target)) + PoseMaskLoss1
+        g_loss += l1_loss * 10
+        return g_loss
+    return g2_loss
+
+def custom_disc_loss(disc_actual, disc_predicted):
+    disc_real, disc_fake_x, disc_fake_g1, disc_fake_g2 = tf.split(disc_predicted, 4)
+    disc_cost = 0.25*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_fake_x, labels=tf.zeros_like(disc_fake_x))) \
+                            + 0.25*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_fake_g2, labels=tf.zeros_like(disc_fake_g2)))
+    disc_cost += 0.5*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_real, labels=tf.ones_like(disc_real)))
+    return disc_cost
+
+def fake_loss(actual, predicted):
+    return predicted
+
+if __name__=='__main__':
+    pickle_files_dir = 'data/'
+    with open(pickle_files_dir+'mask_target.p', 'rb') as f:
+        mask_target = pickle.load(f)
+    with open(pickle_files_dir+'x.p', 'rb') as f:
+        x = pickle.load(f)
+    with open(pickle_files_dir+'x_target.p', 'rb') as f:
+        x_target = pickle.load(f)
+
+    epochs=30
+    batch_size=2
+    training_images=64
+    
     model = main_model()
 
     # defining loss, optimizers and metrics
@@ -74,10 +113,7 @@ def model():
     # compile model
     model.compile(optimizer=optimizer_1, loss=loss_1, loss_weights=lossWeights, metrics=metrics)
 
-    model.fit([x, x_target, mask_target], y=[x_target, x_target, np.empty((64, 1, 1, 1)), np.empty((64, 128, 64, 3))], batch_size=2, epochs=30)
+    model.fit([x, x_target, mask_target], y=[x_target, x_target, np.empty((training_images, 1, 1, 1)), np.empty((training_images, 128, 64, 3))], batch_size=batch_size, epochs=epochs)
 
     # model.summary()
-
-
-if __name__=='__main__':
-    model()
+    training_model(x, x_target, mask_target)

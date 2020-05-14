@@ -1,8 +1,6 @@
 import random 
 import numpy as np
 import tensorflow as tf
-from .loss_functions import custom_output_g1_loss, custom_output_g2_loss, custom_disc_loss, fake_loss
-
 
 from keras.layers import (Conv2D, Flatten, Activation, Dense, Reshape, \
                           UpSampling2D, Input, merge, Concatenate, merge, add, Lambda, \
