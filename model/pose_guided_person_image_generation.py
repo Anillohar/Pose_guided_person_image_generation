@@ -131,14 +131,17 @@ def discriminator(input_image, input_dim=3, filters=64, name=''):
         x = Activation(LeakyReLU)(x)
 
         x = Conv2D(2*filters, kernel_size=5, strides=2, padding='same')(x)
+        x = BatchNormalization()(x)
         # x = Lambda(DiscBatchNormalization)(x)
         x = Activation(LeakyReLU)(x)
 
         x = Conv2D(4*filters, kernel_size=5, strides=2, padding='same')(x)
+        x = BatchNormalization()(x)
         # x = Lambda(DiscBatchNormalization)(x)
         x = Activation(LeakyReLU)(x)
 
         x = Conv2D(8*filters, kernel_size=5, strides=2, padding='same')(x)
+        x = BatchNormalization()(x)
         # x = Lambda(DiscBatchNormalization)(x)
         x = Activation(LeakyReLU)(x)
 

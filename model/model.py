@@ -33,9 +33,13 @@ def main_model():
     x = Input(shape=(128, 64, 3))
     target = Input(shape=(128, 64, 3))
     mask_target = Input(name='mask_target', shape=(128, 64, 3))
-    mask_target_fake = Reshape(target_shape=(128, 64, 3), name='mask_target_fake')(mask_target)
+    # mask_target_fake = Reshape(target_shape=(128, 64, 3), name='mask_target_fake')(mask_target)
+    # flatten_mask_target_fake = Flatten()(mask_target)
+    # mask_target_fake = Dense(1, name='mask_target_fake')(flatten_mask_target_fake)
     
-    output_g1 = gan_1(x)
+    input_g1 = Concatenate(axis=-1)([x, mask_target])
+    output_g1 = gan_1(input_g1)
+    
     input_g2 = Concatenate(axis=-1)([x, output_g1])
     
     diff_map = gan_2(input_g2)
@@ -44,15 +48,14 @@ def main_model():
     triplet = Concatenate(axis=0)([target, x, output_g1, output_g2])
     discriminator_input = Permute([3,1,2])(triplet)
     discriminator_output = discriminator(triplet)
-    
-    return Model([x, target, mask_target], [output_g1, output_g2, discriminator_output, mask_target_fake])
+    return Model([x, target, mask_target], [output_g1, output_g2, discriminator_output])
 
 
 def fake_metrics(y_actual, y_pred):
   return 0.0
 
 # loss functions
-def custom_output_g1_loss(mask_target):
+def custom_output_g1_loss():
     def g1_loss(x_target, gan_1_predicted):
         layer = model.get_layer(name='mask_target')
         mask_target = layer.output
@@ -63,7 +66,7 @@ def custom_output_g1_loss(mask_target):
         return g_loss1
     return g1_loss
   
-def custom_output_g2_loss(mask_target):
+def custom_output_g2_loss():
     def g2_loss(x_target, gan_2_predicted):
         layer = model.get_layer(name='mask_target')
         mask_target = layer.output
@@ -88,13 +91,15 @@ def fake_loss(actual, predicted):
     return predicted
 
 if __name__=='__main__':
-    pickle_files_dir = 'data/'
-    with open(pickle_files_dir+'mask_target.p', 'rb') as f:
-        mask_target = pickle.load(f)
-    with open(pickle_files_dir+'x.p', 'rb') as f:
-        x = pickle.load(f)
-    with open(pickle_files_dir+'x_target.p', 'rb') as f:
-        x_target = pickle.load(f)
+    from numpy import load
+    # load array
+    x = load('../data/x_c.npy')
+    mask_target = load('../data/mask_target.npy')
+    x_target = load('../data/x_target.npy')
+
+    x_train=(x/127.5)-1
+    mask_target_train=(mask_target/127.5)-1
+    x_target_train=(x_target/127.5)-1
 
     epochs=30
     batch_size=2
@@ -103,17 +108,26 @@ if __name__=='__main__':
     model = main_model()
 
     # defining loss, optimizers and metrics
-    loss_1 = dict(output_g1=custom_output_g1_loss(mask_target), output_g2=custom_output_g2_loss(mask_target), 
-                  discriminator_output=custom_disc_loss, mask_target_fake=fake_loss)
-    lossWeights = dict(output_g1=1.0, output_g2=1.0, discriminator_output=1.0, mask_target_fake=0.0)
+    loss_1 = dict(output_g1=custom_output_g1_loss(), output_g2=custom_output_g2_loss(), 
+              discriminator_output=custom_disc_loss)
+
+    lossWeights = dict(output_g1=1.0, output_g2=1.0, discriminator_output=1.0)
     metrics = dict(output_g1='accuracy', output_g2='accuracy', discriminator_output=fake_metrics, mask_target_fake=fake_metrics)
 
     optimizer_1 = Adam(lr=2e-5, beta_1=0.5)
 
     # compile model
     model.compile(optimizer=optimizer_1, loss=loss_1, loss_weights=lossWeights, metrics=metrics)
+    
+    filepath="weights.best.hdf5"
+    
+    checkpoint = ModelCheckpoint(filepath, monitor='loss', verbose=1, save_best_only=True, mode='min')
+    callbacks_list = [checkpoint]
 
-    model.fit([x, x_target, mask_target], y=[x_target, x_target, np.empty((training_images, 1, 1, 1)), np.empty((training_images, 128, 64, 3))], batch_size=batch_size, epochs=epochs)
+    model.fit([x_train[2500:], x_target_train[2500:], mask_target_train[2500:]], 
+                y=[x_target_train[2500:], x_target_train[2500:], np.empty((10300, 1, 1, 1))],
+                validation_data=([x_train[:2500], x_target_train[:2500], mask_target_train[:2500]],
+                    [x_target_train[:2500], x_target_train[:2500], np.empty((2500, 1, 1, 1))]), 
+                batch_size=32, epochs=1000, callbacks=callbacks_list)
 
     # model.summary()
-    training_model(x, x_target, mask_target)
