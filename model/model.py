@@ -8,7 +8,7 @@ from keras.models import Model
 from keras.optimizers import Adam
 from keras.layers import (Conv2D, Flatten, Activation, Dense, Reshape, \
                           UpSampling2D, Input, merge, Concatenate, merge, add, Lambda, \
-                          BatchNormalization, Permute, Add
+                          BatchNormalization, Permute, Add, ModelCheckpoint
                          )
 from pose_guided_person_image_generation import (gan_1, gan_2, get_noise, \
                                                     LeakyReLU, param, DiscBatchNormalization, \
