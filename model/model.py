@@ -93,9 +93,9 @@ def fake_loss(actual, predicted):
 if __name__=='__main__':
     from numpy import load
     # load array
-    x = load('../data/x_c.npy')
-    mask_target = load('../data/mask_target.npy')
-    x_target = load('../data/x_target.npy')
+    x = load('data/x_c.npy')
+    mask_target = load('data/mask_target.npy')
+    x_target = load('data/x_target.npy')
 
     x_train=(x/127.5)-1
     mask_target_train=(mask_target/127.5)-1
@@ -112,12 +112,11 @@ if __name__=='__main__':
               discriminator_output=custom_disc_loss)
 
     lossWeights = dict(output_g1=1.0, output_g2=1.0, discriminator_output=1.0)
-    metrics = dict(output_g1='accuracy', output_g2='accuracy', discriminator_output=fake_metrics, mask_target_fake=fake_metrics)
 
     optimizer_1 = Adam(lr=2e-5, beta_1=0.5)
 
     # compile model
-    model.compile(optimizer=optimizer_1, loss=loss_1, loss_weights=lossWeights, metrics=metrics)
+    model.compile(optimizer=optimizer_1, loss=loss_1, loss_weights=lossWeights)
     
     filepath="weights.best.hdf5"
     
